@@ -1,0 +1,214 @@
+---
+title: "Factors Influencing Drug Prices: Shiny-Enabled Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    vertical_layout: scroll
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(rsconnect)
+library(jsonlite)
+```
+
+
+```{r, warning = FALSE}
+library(tidyverse)
+library(tidytext)
+
+library(broom)
+library(dplyr)
+library(forcats)
+library(httr)
+library(janitor)
+library(knitr)
+library(plotly)
+library(readxl)
+library(rvest)
+library(stringr)
+library(viridis)
+library(shiny)
+```
+
+```{r}
+##load data
+
+final_dataset = read_csv("../p8105_final_jmmm/data/final_dataset_20171205.csv")
+
+top_advertising = c("Humira", "Lyrica", "Eliquis", "Xeljanz", "Cialis", "Invokana", "Breo", "Latuda", "Victoza", "Viagra")
+
+top_drugs_by_sales = c("Humira", "Harvoni", "Enbrel", "Lantus Solostar", "Remicade", "Januvia", "Advair Diskus", "Lyrica", "Crestor", "Neulasta", "Copaxone", "Rituxan", "Tecfidera", "Xarelto", "Lantus", "Eliquis", "Truvada", "Vyvanse", "Avastin", "Symbicort")
+
+most_abused = c("Vicodin", "OxyContin", "Ritalin", "Concerta", "Focalin", "Metadate", "Ambien", "Lunesta", "Valium", "Xanax", "Duragesic", "Opana", "Darvon", "Dilaudid", "Demerol", "Lomotil", "Nembutal", "Dexedrine", "Adderall", "Percocet", "Suboxone", "Fentanyl")
+
+most_popular = c("Viagra", "Lipitor", "Xanax", "Celebrex", "Prozac", "Crestor", "Nexium", "Lisinopril", "Zoloft", "Abilify", "Prilosec", "Percocet", "Vicodin", "Zocor")
+
+
+drug_price = read_csv("../data/drug_price.csv") %>%
+  clean_names()
+
+drug_price = 
+  drug_price %>%
+  rename(trade_name = ndc_description,
+         drug_type = classification_for_rate_setting,
+         unit_price = nadac_per_unit) %>%
+  mutate(trade_name = str_replace(trade_name, "[0-9]", "_"),
+         trade_name = str_to_title(trade_name),
+         otc = recode(otc, "Y" = "yes", "N" = "no"),
+         otc = str_to_title(otc),
+         otc = as.factor(otc)) %>% 
+  separate(trade_name, into = c("trade_name", "remove"), sep = "_") %>% 
+  separate(effective_date, into = c("year", "month", "date")) %>%
+  select(-c(date, x1, remove)) %>%
+  mutate(trade_name = trimws(trade_name, which = c("both"))) %>% 
+  separate(trade_name, into = c("trade_name", "remove"), sep = " ") %>% 
+  filter(is.na(remove)) %>%
+  select(-remove) %>% 
+  filter(pricing_unit == "GM" | pricing_unit == "EA") %>% 
+  select(trade_name, everything()) 
+
+patents = final_dataset %>%
+  ungroup() %>% 
+  select(appfull, disease, avg_price, patent_num, year_pat_expires, approval_year, year_excl_expires) %>% 
+  filter(!duplicated(patent_num)) %>%
+  filter(!is.na(disease)) %>%
+  filter(year_pat_expires > 2017) %>% 
+  mutate(
+    year_pat_expires = as.factor(year_pat_expires), 
+    disease = str_replace(disease, "Clostridium Difficile-Associated Diarrhea", "Diarrhea_nosocomial"),
+    disease = str_replace(disease, "Chronic Diarrhea", "Diarrhea (chronic)"),
+    disease = str_replace(disease, "Chronic Kidney Disease", "Kidney Disease (chronic)"),
+    disease = str_replace(disease, "Chronic Myeloid Leukemia", "Myeloid Leukemia"),
+    disease = str_replace(disease, "Thyroid Disease", "Thyroid Disorders"),
+    #appfull = str_replace(appfull, "-", " "),
+    appfull = str_replace(appfull, " Ab", ""),
+    appfull = str_replace(appfull, " And", ""),
+    appfull = str_replace(appfull, " Biotech", ""),
+    appfull = str_replace(appfull, " Co", ""),
+    appfull = str_replace(appfull, " Inc", ""),
+    appfull = str_replace(appfull, " International", ""),
+    appfull = str_replace(appfull, " Ireland s", ""),
+    appfull = str_replace(appfull, " Ltd", ""),
+    appfull = str_replace(appfull, " Llc", ""),
+    appfull = str_replace(appfull, " Lp", ""),
+    appfull = str_replace(appfull, " Holdings", ""),
+    appfull = str_replace(appfull, " Pharmaceutical", ""),
+    appfull = str_replace(appfull, " Pharmaceuticals", ""),
+    appfull = str_replace(appfull, " Products", ""),
+    appfull = str_replace(appfull, " Research Institute", ""),
+    appfull = str_replace(appfull, " Research Development", ""),
+    appfull = str_replace(appfull, " s ", ""),
+    appfull = str_replace(appfull, " Trading", ""),
+    appfull = str_replace(appfull, " Unltd", ""),
+    appfull = str_replace(appfull, "Allergans", "Allergan"),
+    appfull = str_replace(appfull, "Astrazenecas", "Astrazeneca"),
+    appfull = str_replace(appfull, "Bristol-Myers Squibb", "Bristol Myers Squibb"),
+    appfull = str_replace(appfull, "Bristol-Myers Squibb Co", "Bristol Myers Squibb Co"),
+    appfull = str_replace(appfull, "Janssens", "Janssen"),
+    appfull = str_replace(appfull, "Ingelheims", "Ingelheim"),
+    appfull = str_replace(appfull, "Pfizers", "Pfizer"),
+    appfull = str_replace(appfull, "Wyeths Wholly Owned Sub Pfizer Inc", "Pfizer")) %>%
+  arrange(appfull)
+
+```
+
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+This `flexdashboard` with Shiny shows some of the results of our analysis on drug prices and several potentially related factors.
+
+* Use the first widget to look at the change in distribution of prices over time for the most abused drugs.
+
+* Use the second widget to see how the average price of all drugs for a particular disease change over time
+
+* Use the final widget to look at the number of expiring patents for one or more companies (top 14).
+
+
+
+```{r}
+
+drugs = final_dataset %>% filter(trade_name %in% most_abused) %>%  pull(trade_name) %>% unique()
+
+selectInput("drug", label = h3("Most Abused Drugs"),
+            choices = drugs, selected = "Ambien")
+
+
+
+diseases = final_dataset %>% pull(disease) %>% unique()
+
+selectInput("disease_choice", label = h3("Select Disease"),
+            choices = diseases, selected = "Obesity")
+
+pat_exp = patents %>%
+  group_by(appfull, year_pat_expires) %>%
+  count() %>% 
+  rename(num_pat_exp = n) %>%
+  filter(!is.na(year_pat_expires)) #%>%
+  #arrange(-num_pat_exp)
+  
+  
+company = c("Keryx Biopharmaceuticals", "Eisai", "Celgenerp", "Gd Searle", "Gilead Sciences", "Salixs", "Abbvie", "Allergan", "Amgen", "Forest Laboratories", "Horizon Pharma", "Janssen", "Otsuka", "Sunovions")
+
+checkboxGroupInput("company_choice", label = h3("Choose Companies"),
+                   choices = company, selected = "Abbvie")
+
+
+```
+
+
+Column
+-----------------------------------------------------------------------
+
+### Violin 
+```{r boxplot}
+
+renderPlot(
+  drug_price %>%
+  filter(trade_name == input$drug) %>%
+  ggplot(aes(x = year, y = unit_price, fill = year)) +
+  geom_violin() + xlim('2013', '2014', '2015', '2016', '2017')) 
+
+```
+
+<!-- Row {.tabset .tabset-fade} -->
+<!-- ----------------------------------------------------------------------- -->
+
+### Spaghetti Plot
+
+```{r scatterplot}
+
+renderPlotly(
+final_dataset %>% 
+  filter(disease == input$disease_choice) %>%
+  filter(pricing_unit == "EA" & !is.na(disease)) %>% 
+  plot_ly(x = ~year, y = ~avg_price, type = "scatter", mode = "lines", text = ~paste("Drug: ", trade_name, '<br>Disease:', disease), color = ~trade_name, alpha = 0.5) %>% 
+  layout(title = "Average Price (USD) of Drugs over Time", showlegend = FALSE))
+
+```
+
+### Bubble chart 
+
+```{r bubble plot}
+
+renderPlotly(
+pat_exp %>%
+  filter(appfull %in% input$company_choice) %>%
+  plot_ly(x = ~year_pat_expires, 
+          y = ~appfull, 
+          color = ~appfull, 
+          type = "scatter", 
+          mode = 'markers', 
+          marker = list(size = ~num_pat_exp*3), 
+          text = ~paste('Count: ', num_pat_exp)) %>%
+  layout(title = "Projection of Expiring Patents by Pharmaceutical Company ", 
+         yaxis = list(
+           title = "Pharmaceutical Company"),
+           zeroline = FALSE,
+           showline = FALSE,
+           showticklabels = FALSE,
+           showgrid = TRUE,
+         showlegend = FALSE))
+
+```
+
